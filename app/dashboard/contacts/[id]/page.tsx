@@ -1,10 +1,16 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getContactById } from "@/lib/contacts-data";
+import { getContactById, getContactOptions } from "@/lib/contacts-data";
+import { getDealsForContact, getDealOptions } from "@/lib/deals-data";
+import { getUserOptions } from "@/lib/users-data";
+import { DEAL_STAGE_LABELS } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteContactButton } from "@/components/contacts/delete-contact-button";
+import { ActivityTimeline } from "@/components/activities/activity-timeline";
+import { QuickAddTaskButton } from "@/components/tasks/quick-add-task-button";
+import { formatCurrency } from "@/lib/format";
 
 interface ContactDetailPageProps {
   params: Promise<{ id: string }>;
@@ -31,6 +37,16 @@ export default async function ContactDetailPage({
   if (!contact) {
     notFound();
   }
+
+  const [deals, contactOptions, dealOptions, userOptions] = await Promise.all([
+    getDealsForContact(id, {
+      userId: session.user.id,
+      role: session.user.role,
+    }),
+    getContactOptions({ userId: session.user.id, role: session.user.role }),
+    getDealOptions({ userId: session.user.id, role: session.user.role }),
+    session.user.role === "admin" ? getUserOptions() : Promise.resolve([]),
+  ]);
 
   const canManage =
     session.user.role === "admin" || contact.owner?.id === session.user.id;
@@ -135,24 +151,56 @@ export default async function ContactDetailPage({
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Deals</CardTitle>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/dashboard/deals/new?contactId=${contact.id}`}>
+              + New Deal
+            </Link>
+          </Button>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-slate-500">
-            No deals yet — this will be wired up on Day 3.
-          </p>
+          {deals.length === 0 ? (
+            <p className="text-sm text-slate-500">No deals yet.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {deals.map((deal) => (
+                <li key={deal.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <Link
+                      href={`/dashboard/deals?open=${deal.id}`}
+                      className="text-sm font-medium text-slate-900 hover:underline"
+                    >
+                      {deal.title}
+                    </Link>
+                    <p className="text-xs text-slate-500">
+                      {DEAL_STAGE_LABELS[deal.stage]}
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold text-slate-900">
+                    {formatCurrency(deal.value)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Activity Timeline</CardTitle>
+          <QuickAddTaskButton
+            contacts={contactOptions}
+            deals={dealOptions}
+            users={userOptions}
+            currentUserId={session.user.id}
+            role={session.user.role}
+            defaultValues={{ contactId: contact.id }}
+          />
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-slate-500">
-            No activity yet — this will be wired up on Day 4.
-          </p>
+          <ActivityTimeline contactId={contact.id} />
         </CardContent>
       </Card>
     </div>

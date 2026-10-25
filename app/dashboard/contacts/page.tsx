@@ -1,12 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getContacts } from "@/lib/contacts-data";
+import { getContactsFiltered, getContactTagOptions } from "@/lib/contacts-data";
+import { getUserOptions } from "@/lib/users-data";
+import {
+  contactFiltersToQuery,
+  hasActiveContactFilters,
+  parseContactFilters,
+  type RawSearchParams,
+} from "@/lib/filters";
+import { buildContactChips } from "@/lib/filter-chips";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ContactFilterBar } from "@/components/filters/contact-filter-bar";
+import { FilterChips } from "@/components/filters/filter-chips";
 
 interface ContactsPageProps {
-  searchParams: Promise<{ q?: string; page?: string; deleted?: string }>;
+  searchParams: Promise<RawSearchParams>;
 }
 
 export default async function ContactsPage({ searchParams }: ContactsPageProps) {
@@ -16,21 +25,24 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
   }
 
   const sp = await searchParams;
-  const query = sp.q ?? "";
-  const page = Number(sp.page ?? "1") || 1;
+  const filters = parseContactFilters(sp);
+  const user = { userId: session.user.id, role: session.user.role };
+  const isAdmin = user.role === "admin";
 
-  const { contacts, total, totalPages, page: currentPage } = await getContacts({
-    userId: session.user.id,
-    role: session.user.role,
-    query,
-    page,
-  });
+  const [result, tagOptions, ownerOptions] = await Promise.all([
+    getContactsFiltered(filters, user),
+    getContactTagOptions(user),
+    isAdmin ? getUserOptions() : Promise.resolve(undefined),
+  ]);
+  const { contacts, total, totalPages, page: currentPage } = result;
+
+  const filtersActive = hasActiveContactFilters(filters);
+  const ownerNames = new Map((ownerOptions ?? []).map((u) => [u.id, u.name]));
+  const chips = buildContactChips(filters, ownerNames);
 
   const buildHref = (targetPage: number) => {
-    const params = new URLSearchParams();
-    if (query) params.set("q", query);
-    params.set("page", String(targetPage));
-    return `/dashboard/contacts?${params.toString()}`;
+    const query = contactFiltersToQuery(filters, { page: targetPage });
+    return query ? `/dashboard/contacts?${query}` : "/dashboard/contacts";
   };
 
   return (
@@ -40,7 +52,8 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
           <h1 className="text-2xl font-semibold text-slate-900">Contacts</h1>
           <p className="text-sm text-slate-500">
             {total} contact{total === 1 ? "" : "s"}
-            {session.user.role === "admin" ? " (all owners)" : ""}
+            {filtersActive ? " found" : ""}
+            {isAdmin && !filters.owner ? " (all owners)" : ""}
           </p>
         </div>
         <Button asChild>
@@ -54,25 +67,21 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
         </p>
       )}
 
-      <form method="get" className="flex max-w-sm gap-2">
-        <Input
-          type="text"
-          name="q"
-          defaultValue={query}
-          placeholder="Search name, email, or company..."
-        />
-        <Button type="submit" variant="outline">
-          Search
-        </Button>
-      </form>
+      <ContactFilterBar
+        filters={filters}
+        tagOptions={tagOptions}
+        ownerOptions={ownerOptions}
+      />
+
+      <FilterChips chips={chips} clearHref="/dashboard/contacts" />
 
       {contacts.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white py-16 text-center">
-          {query ? (
+          {filtersActive ? (
             <>
-              <p className="text-slate-600">No contacts match &ldquo;{query}&rdquo;.</p>
+              <p className="text-slate-600">No contacts match these filters.</p>
               <Button asChild variant="outline">
-                <Link href="/dashboard/contacts">Clear search</Link>
+                <Link href="/dashboard/contacts">Clear all filters</Link>
               </Button>
             </>
           ) : (

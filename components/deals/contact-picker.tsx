@@ -14,9 +14,15 @@ export interface ContactOption {
 interface ContactPickerProps {
   contacts: ContactOption[];
   defaultContactId?: string;
+  /** Form field name for the selected contact id. */
+  name?: string;
 }
 
-export function ContactPicker({ contacts, defaultContactId }: ContactPickerProps) {
+export function ContactPicker({
+  contacts,
+  defaultContactId,
+  name = "contactId",
+}: ContactPickerProps) {
   const defaultContact = contacts.find((c) => c.id === defaultContactId);
   const [selectedId, setSelectedId] = useState(defaultContactId ?? "");
   const [query, setQuery] = useState(defaultContact?.name ?? "");
@@ -37,7 +43,7 @@ export function ContactPicker({ contacts, defaultContactId }: ContactPickerProps
 
   return (
     <div className="relative">
-      <input type="hidden" name="contactId" value={selectedId} />
+      <input type="hidden" name={name} value={selectedId} />
       <Input
         type="text"
         placeholder="Search contacts by name, email, or company..."

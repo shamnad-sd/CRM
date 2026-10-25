@@ -23,6 +23,25 @@ const ContactSchema = new Schema<IContact>({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Indexes back the Contacts list filters/sorts. `ownerId` leads the compound
+// indexes because sales users are always scoped to their own records.
+// name/company sorts use a case-insensitive collation, so their indexes carry
+// the same collation or the sort couldn't use them. They end in _id because
+// the list sorts by (field, _id) so pagination is stable when values repeat.
+const CASE_INSENSITIVE = { locale: "en", strength: 2 } as const;
+ContactSchema.index({ ownerId: 1, createdAt: -1, _id: -1 });
+ContactSchema.index(
+  { ownerId: 1, name: 1, _id: 1 },
+  { collation: CASE_INSENSITIVE }
+);
+ContactSchema.index(
+  { ownerId: 1, company: 1, _id: 1 },
+  { collation: CASE_INSENSITIVE }
+);
+ContactSchema.index({ source: 1 });
+ContactSchema.index({ tags: 1 });
+ContactSchema.index({ createdAt: -1 });
+
 const Contact: Model<IContact> =
   models.Contact || model<IContact>("Contact", ContactSchema);
 

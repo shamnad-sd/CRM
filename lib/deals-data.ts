@@ -1,9 +1,10 @@
-import { isValidObjectId, Types } from "mongoose";
+import { isValidObjectId, Types, type QueryFilter } from "mongoose";
 import { connectToDatabase } from "@/lib/mongodb";
-import Deal from "@/models/Deal";
+import Deal, { type IDeal } from "@/models/Deal";
 import Contact from "@/models/Contact";
 import "@/models/User"; // ensure the User model is registered for populate()
 import type { DealStage } from "@/lib/constants";
+import { dateRangeToBounds, type DealFilters } from "@/lib/filters";
 import type { AppUserRole } from "@/types/next-auth";
 
 export interface DealContactRef {
@@ -70,14 +71,44 @@ function ownershipFilter(userId: string, role: AppUserRole) {
   return role === "admin" ? {} : { ownerId: userId };
 }
 
-export async function getDeals(options: {
-  userId: string;
-  role: AppUserRole;
-}): Promise<DealSummary[]> {
+/**
+ * Deals matching the filters, newest first. Unpaginated — the Kanban board
+ * needs every matching card so column counts/totals reflect the filtered set.
+ *
+ * As with contacts, ownership is applied first: a sales user is always
+ * scoped to their own deals, and passing someone else's `owner` returns
+ * nothing. Only admins may filter by owner.
+ */
+export async function getDealsFiltered(
+  filters: DealFilters,
+  user: { userId: string; role: AppUserRole }
+): Promise<DealSummary[]> {
+  const filter: QueryFilter<IDeal> = {};
+
+  if (user.role === "admin") {
+    if (filters.owner) filter.ownerId = new Types.ObjectId(filters.owner);
+  } else {
+    if (filters.owner && filters.owner !== user.userId) return [];
+    filter.ownerId = new Types.ObjectId(user.userId);
+  }
+
+  if (filters.stage.length > 0) filter.stage = { $in: filters.stage };
+  if (filters.contact) filter.contactId = new Types.ObjectId(filters.contact);
+
+  if (filters.minValue !== undefined || filters.maxValue !== undefined) {
+    filter.value = {
+      ...(filters.minValue !== undefined && { $gte: filters.minValue }),
+      ...(filters.maxValue !== undefined && { $lte: filters.maxValue }),
+    };
+  }
+
+  const closing = dateRangeToBounds(filters.closeFrom, filters.closeTo);
+  if (closing) filter.expectedCloseDate = closing;
+
   await connectToDatabase();
 
-  const docs = (await Deal.find(ownershipFilter(options.userId, options.role))
-    .sort({ createdAt: -1 })
+  const docs = (await Deal.find(filter)
+    .sort({ createdAt: -1, _id: -1 })
     .populate("contactId", "name")
     .populate("ownerId", "name")
     .lean()) as unknown as LeanDeal[];

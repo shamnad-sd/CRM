@@ -1,8 +1,13 @@
-import { isValidObjectId, Types } from "mongoose";
+import { isValidObjectId, Types, type QueryFilter } from "mongoose";
 import { connectToDatabase } from "@/lib/mongodb";
-import Contact from "@/models/Contact";
+import Contact, { type IContact } from "@/models/Contact";
 import "@/models/User"; // ensure the User model is registered for populate()
 import type { ContactSource } from "@/lib/constants";
+import {
+  dateRangeToBounds,
+  escapeRegex,
+  type ContactFilters,
+} from "@/lib/filters";
 import type { AppUserRole } from "@/types/next-auth";
 
 export const CONTACTS_PAGE_SIZE = 10;
@@ -49,10 +54,6 @@ interface LeanContact {
   ownerId: PopulatedOwner | Types.ObjectId | null;
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function toSummary(doc: LeanContact): ContactSummary {
   const owner =
     doc.ownerId && typeof doc.ownerId === "object" && "name" in doc.ownerId
@@ -72,22 +73,45 @@ function toSummary(doc: LeanContact): ContactSummary {
   };
 }
 
-export async function getContacts(options: {
-  userId: string;
-  role: AppUserRole;
-  query?: string;
-  page?: number;
-}): Promise<ContactListResult> {
-  await connectToDatabase();
+/** Names/companies sort case-insensitively; matches the collated indexes on the model. */
+const SORT_COLLATION = { locale: "en", strength: 2 } as const;
 
-  const filter: Record<string, unknown> = {};
-  if (options.role !== "admin") {
-    filter.ownerId = options.userId;
+/**
+ * Filtered, sorted, paginated contact list.
+ *
+ * Ownership is applied first and can't be widened by params: a sales user
+ * always gets `ownerId = self`, and asking for someone else's `owner` yields
+ * an empty result rather than being ignored. Only admins may filter by owner.
+ */
+export async function getContactsFiltered(
+  filters: ContactFilters,
+  user: { userId: string; role: AppUserRole }
+): Promise<ContactListResult> {
+  const empty: ContactListResult = {
+    contacts: [],
+    total: 0,
+    page: 1,
+    pageSize: CONTACTS_PAGE_SIZE,
+    totalPages: 1,
+  };
+
+  const filter: QueryFilter<IContact> = {};
+
+  if (user.role === "admin") {
+    if (filters.owner) filter.ownerId = new Types.ObjectId(filters.owner);
+  } else {
+    if (filters.owner && filters.owner !== user.userId) return empty;
+    filter.ownerId = new Types.ObjectId(user.userId);
   }
 
-  const q = options.query?.trim();
-  if (q) {
-    const safe = escapeRegex(q);
+  if (filters.source.length > 0) filter.source = { $in: filters.source };
+  if (filters.tag.length > 0) filter.tags = { $in: filters.tag };
+
+  const created = dateRangeToBounds(filters.from, filters.to);
+  if (created) filter.createdAt = created;
+
+  if (filters.q) {
+    const safe = escapeRegex(filters.q);
     filter.$or = [
       { name: { $regex: safe, $options: "i" } },
       { email: { $regex: safe, $options: "i" } },
@@ -95,17 +119,24 @@ export async function getContacts(options: {
     ];
   }
 
-  const page = Math.max(1, options.page ?? 1);
+  await connectToDatabase();
+
   const total = await Contact.countDocuments(filter);
   const totalPages = Math.max(1, Math.ceil(total / CONTACTS_PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
+  const currentPage = Math.min(filters.page, totalPages);
 
-  const docs = (await Contact.find(filter)
-    .sort({ createdAt: -1 })
+  const direction = filters.dir === "asc" ? 1 : -1;
+  // `_id` tiebreaker keeps pagination stable when sort values repeat.
+  const sort: Record<string, 1 | -1> = { [filters.sort]: direction, _id: direction };
+
+  let query = Contact.find(filter)
+    .sort(sort)
     .skip((currentPage - 1) * CONTACTS_PAGE_SIZE)
     .limit(CONTACTS_PAGE_SIZE)
-    .populate("ownerId", "name")
-    .lean()) as unknown as LeanContact[];
+    .populate("ownerId", "name");
+  if (filters.sort !== "createdAt") query = query.collation(SORT_COLLATION);
+
+  const docs = (await query.lean()) as unknown as LeanContact[];
 
   return {
     contacts: docs.map(toSummary),
@@ -114,6 +145,22 @@ export async function getContacts(options: {
     pageSize: CONTACTS_PAGE_SIZE,
     totalPages,
   };
+}
+
+/** Distinct tags across the contacts this user can see, for the tag filter. */
+export async function getContactTagOptions(user: {
+  userId: string;
+  role: AppUserRole;
+}): Promise<string[]> {
+  await connectToDatabase();
+
+  const filter: QueryFilter<IContact> =
+    user.role === "admin" ? {} : { ownerId: new Types.ObjectId(user.userId) };
+
+  const tags = (await Contact.distinct("tags", filter)) as string[];
+  return tags
+    .filter((tag) => typeof tag === "string" && tag.length > 0)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 export async function getContactById(

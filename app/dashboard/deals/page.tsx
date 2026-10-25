@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getDeals, getDealOptions } from "@/lib/deals-data";
+import { getDealsFiltered, getDealOptions } from "@/lib/deals-data";
 import { getContactOptions } from "@/lib/contacts-data";
 import { getUserOptions } from "@/lib/users-data";
+import { hasActiveDealFilters, parseDealFilters } from "@/lib/filters";
+import { buildDealChips } from "@/lib/filter-chips";
 import { Button } from "@/components/ui/button";
 import { KanbanBoard } from "@/components/deals/kanban-board";
+import { DealFilterBar } from "@/components/filters/deal-filter-bar";
+import { FilterChips } from "@/components/filters/filter-chips";
 
 interface DealsPageProps {
   searchParams: Promise<{
@@ -14,6 +18,7 @@ interface DealsPageProps {
     deleted?: string;
     error?: string;
     open?: string;
+    [key: string]: string | string[] | undefined;
   }>;
 }
 
@@ -24,13 +29,22 @@ export default async function DealsPage({ searchParams }: DealsPageProps) {
   }
 
   const sp = await searchParams;
+  const filters = parseDealFilters(sp);
+  const user = { userId: session.user.id, role: session.user.role };
+  const filtersActive = hasActiveDealFilters(filters);
 
   const [deals, contacts, dealOptions, userOptions] = await Promise.all([
-    getDeals({ userId: session.user.id, role: session.user.role }),
+    getDealsFiltered(filters, user),
     getContactOptions({ userId: session.user.id, role: session.user.role }),
     getDealOptions({ userId: session.user.id, role: session.user.role }),
     session.user.role === "admin" ? getUserOptions() : Promise.resolve([]),
   ]);
+
+  const chips = buildDealChips(
+    filters,
+    new Map(userOptions.map((u) => [u.id, u.name])),
+    new Map(contacts.map((c) => [c.id, c.name]))
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -39,7 +53,8 @@ export default async function DealsPage({ searchParams }: DealsPageProps) {
           <h1 className="text-2xl font-semibold text-slate-900">Deals</h1>
           <p className="text-sm text-slate-500">
             {deals.length} deal{deals.length === 1 ? "" : "s"}
-            {session.user.role === "admin" ? " (all owners)" : ""}
+            {filtersActive ? " found" : ""}
+            {session.user.role === "admin" && !filters.owner ? " (all owners)" : ""}
           </p>
         </div>
         <Button asChild>
@@ -67,6 +82,16 @@ export default async function DealsPage({ searchParams }: DealsPageProps) {
           You don&apos;t have permission to modify that deal.
         </p>
       )}
+
+      {contacts.length > 0 && (
+        <DealFilterBar
+          filters={filters}
+          contacts={contacts}
+          ownerOptions={session.user.role === "admin" ? userOptions : undefined}
+        />
+      )}
+
+      <FilterChips chips={chips} clearHref="/dashboard/deals" />
 
       {contacts.length === 0 && deals.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white py-16 text-center">

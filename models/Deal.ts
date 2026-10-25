@@ -1,6 +1,7 @@
 import { Schema, model, models, type Model, type Document, type Types } from "mongoose";
+import { DEAL_STAGES, type DealStage } from "@/lib/constants";
 
-export type DealStage = "new" | "contacted" | "proposal" | "won" | "lost";
+export type { DealStage };
 
 export interface IDeal extends Document {
   title: string;
@@ -18,7 +19,7 @@ const DealSchema = new Schema<IDeal>({
   value: { type: Number, required: true, min: 0 },
   stage: {
     type: String,
-    enum: ["new", "contacted", "proposal", "won", "lost"],
+    enum: DEAL_STAGES,
     default: "new",
   },
   ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },

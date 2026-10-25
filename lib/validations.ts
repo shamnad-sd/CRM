@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { CONTACT_SOURCES } from "@/lib/constants";
+import { isValidObjectId } from "mongoose";
+import { ACTIVITY_TYPES, CONTACT_SOURCES, DEAL_STAGES } from "@/lib/constants";
 
 export const signupSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(100),
@@ -46,3 +47,68 @@ export const contactSchema = z.object({
 });
 
 export type ContactInput = z.infer<typeof contactSchema>;
+
+export const dealSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(150),
+  contactId: z
+    .string()
+    .trim()
+    .refine(isValidObjectId, { error: "Select a valid contact" }),
+  value: z.coerce
+    .number({ error: "Enter a valid amount" })
+    .min(0, "Value must be 0 or more")
+    .max(1_000_000_000, "Value is too large"),
+  stage: z.enum(DEAL_STAGES, { error: "Select a valid stage" }).default("new"),
+  expectedCloseDate: z.preprocess(
+    emptyToUndefined,
+    z.coerce.date({ error: "Enter a valid date" }).optional()
+  ),
+});
+
+export type DealInput = z.infer<typeof dealSchema>;
+
+export const activitySchema = z.object({
+  type: z.enum(ACTIVITY_TYPES, { error: "Select a valid type" }),
+  content: z.string().trim().min(1, "Content is required").max(2000, "Content is too long"),
+  contactId: z
+    .string()
+    .trim()
+    .refine(isValidObjectId, { error: "Invalid contact" }),
+  dealId: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .trim()
+      .refine(isValidObjectId, { error: "Invalid deal" })
+      .optional()
+  ),
+});
+
+export type ActivityInput = z.infer<typeof activitySchema>;
+
+export const taskSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(200),
+  dueDate: z.coerce.date({ error: "Enter a valid due date" }),
+  contactId: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .trim()
+      .refine(isValidObjectId, { error: "Invalid contact" })
+      .optional()
+  ),
+  dealId: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .trim()
+      .refine(isValidObjectId, { error: "Invalid deal" })
+      .optional()
+  ),
+  assignedTo: z
+    .string()
+    .trim()
+    .refine(isValidObjectId, { error: "Select a valid assignee" }),
+});
+
+export type TaskInput = z.infer<typeof taskSchema>;

@@ -129,3 +129,39 @@ export async function getContactById(
 
   return doc ? toSummary(doc) : null;
 }
+
+export interface ContactOption {
+  id: string;
+  name: string;
+  email: string;
+  company?: string;
+}
+
+interface LeanContactOption {
+  _id: Types.ObjectId;
+  name: string;
+  email: string;
+  company?: string;
+}
+
+/** Unpaginated contact list for pickers (deal forms, etc). */
+export async function getContactOptions(options: {
+  userId: string;
+  role: AppUserRole;
+}): Promise<ContactOption[]> {
+  await connectToDatabase();
+
+  const filter = options.role === "admin" ? {} : { ownerId: options.userId };
+
+  const docs = (await Contact.find(filter)
+    .select("name email company")
+    .sort({ name: 1 })
+    .lean()) as unknown as LeanContactOption[];
+
+  return docs.map((doc) => ({
+    id: doc._id.toString(),
+    name: doc.name,
+    email: doc.email,
+    company: doc.company,
+  }));
+}

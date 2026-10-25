@@ -18,7 +18,7 @@ export default async function DashboardPage() {
       role: session.user.role,
     }),
     // Always the signed-in user's own tasks, regardless of role — this is
-    // a personal "what's on my plate" widget, not the admin all-tasks view.
+    // a personal "what' on my plate" widget, not the admin all-tasks view.
     getTasksForUser(session.user.id, session.user.role),
   ]);
 
